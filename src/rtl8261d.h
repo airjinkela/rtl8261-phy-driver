@@ -26,6 +26,8 @@ typedef struct rtk_eee_cfg {
 
 } rtk_eee_cfg_t;
 
+int rtl822x_hwmon_init(struct phy_device *phydev);
+
 int rtl8261x_config_init(struct phy_device *phydev);
 int rtl8261x_get_features(struct phy_device *phydev);
 int rtl8261x_read_status(struct phy_device *phydev);

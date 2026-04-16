@@ -6,14 +6,17 @@
 #include <linux/delay.h>
 #include <linux/clk.h>
 #include <linux/string_choices.h>
+#include <linux/hwmon.h>
 
 #include "rtl8261d.h"
 #include "rtl8261x_patchs.h"
 
-#define RTL8261C_VND2_PHY_STATE			0xA420
+#define PHYID_RTL8261D_CG			0x001cc898
 
-#define RTL8261C_VND2_PATCH_MODE_CTRL		0xB820
-#define RTL8261C_VND2_PATCH_MODE_STAT		0xB800
+#define RTL8261C_VND2_PHY_STATE		0xA420
+
+#define RTL8261C_VND2_PATCH_MODE_CTRL	0xB820
+#define RTL8261C_VND2_PATCH_MODE_STAT	0xB800
 #define RTL8261C_VND2_PATCH_CTRL		0xB82E
 #define RTL8261C_PATCH_SETUP_VAL		0x6100
 
@@ -21,6 +24,11 @@
 #define RTL8261C_VND2_INDIRECT_DATA		0xA438
 
 #define RTL8261C_VND2_THERMAL_SENSOR_CTRL	0xB54C
+
+/* OCP Registers */
+#define RTL8261C_OCP_BASE_MII		0xa400
+#define RTL8261C_OCP_EEE_CFG	 	0xA432
+#define RTL8261C_OCP_POWER_CFG		0xa430
 
 int MmdPhyRead(struct phy_device *phydev, int devad, uint32_t regnum, uint16_t *val)
 {
@@ -86,16 +94,16 @@ int Nic_Rtl8261X_phy_init(struct phy_device *phydev)
 	ret = Nic_Rtl8261X_wait_for_bit(phydev, RTL8261C_VND2_PHY_STATE, 3, 1);
 	if (ret) return ret;
 
-	ret = MmdPhyWrite(phydev, MDIO_MMD_VEND2, 0xA400, 0x9200);
+	ret = MmdPhyWrite(phydev, MDIO_MMD_VEND2, RTL8261C_OCP_BASE_MII, 0x9200);
 	if (ret) return ret;
 
 	// check phy id
 	uint32_t phy_id;
-	ret = MmdPhyRead(phydev, 1, 2, &value);
+	ret = MmdPhyRead(phydev, MDIO_MMD_PMAPMD, 2, &value);
 	if (ret) return ret;
 	phy_id = (uint32_t)value << 16;
 
-	ret = MmdPhyRead(phydev, 1, 3, &value);
+	ret = MmdPhyRead(phydev, MDIO_MMD_PMAPMD, 3, &value);
 	if (ret) return ret;
 	phy_id |= (uint32_t)value;
 
@@ -257,10 +265,10 @@ int Nic_Rtl8261X_phy_init(struct phy_device *phydev)
 	if (ret) return ret;
 
 
-	ret = MmdPhyRead(phydev, MDIO_MMD_VEND2, 0xA432, &value);
+	ret = MmdPhyRead(phydev, MDIO_MMD_VEND2, RTL8261C_OCP_EEE_CFG, &value);
 	if (ret) return ret;
 	value |= 0x20u;
-	ret = MmdPhyWrite(phydev, MDIO_MMD_VEND2, 0xA432, value);
+	ret = MmdPhyWrite(phydev, MDIO_MMD_VEND2, RTL8261C_OCP_EEE_CFG, value);
 	if (ret) return ret;
 
 	ret = MmdPhyWrite(phydev, MDIO_MMD_VEND2, RTL8261C_VND2_INDIRECT_ADDR, 0x801E);
@@ -269,7 +277,7 @@ int Nic_Rtl8261X_phy_init(struct phy_device *phydev)
 	ret = MmdPhyWrite(phydev, MDIO_MMD_VEND2, RTL8261C_VND2_INDIRECT_DATA, 0x1515);
 	if (ret) return ret;
 
-	ret = MmdPhyWrite(phydev, MDIO_MMD_VEND2, 0xA400, 0x9200);
+	ret = MmdPhyWrite(phydev, MDIO_MMD_VEND2, RTL8261C_OCP_BASE_MII, 0x9200);
 	if (ret) return ret;
 
 	phydev_info(phydev, "RTL8261X init done !!\n");
@@ -329,51 +337,63 @@ int Nic_Rtl8261X_serdes_option_set(struct phy_device *phydev, uint16_t option, u
 	switch (option)
 	{
 	case 0:
+        /* 10M: 30.0x6977.7:0 */
 		reg_addr = 0x6977;
 		val_to_set = val & 0xF;
 		value_mask = 0xFFA0;
 		break;
 	case 1:
+        /* 100M: 30.0x6976.7:0 */
 		reg_addr = 0x6976;
 		val_to_set = val & 0xF;
 		value_mask = 0xFFA0;
 		break;
 	case 2:
+        /* 1G: 30.0x6975.7:0 */
 		reg_addr = 0x6975;
 		val_to_set = val & 0xF;
 		value_mask = 0xFFA0;
 		break;
 	case 3:
+        /* 1G-Lite: 30.0x6975.15:8 */
+		// in other rtk source code the regsiter should be 0x6975 
+		// But in the disassembly code the register is 0x6976
 		reg_addr = 0x6976;
 		val_to_set = val & 0xF00;
 		value_mask = 0xA0FF;
 		break;
 	case 4:
+        /* unknow */
 		reg_addr = 0x6972;
 		val_to_set = val & 0xF;
 		value_mask = 0xFFA0;
 		break;
 	case 5:
+        /* 2.5G: 30.0x6974.7:0 */
 		reg_addr = 0x6974;
 		val_to_set = val & 0xF;
 		value_mask = 0xFFA0;
 		break;
 	case 6:
+        /* 5G: 30.0x6973.7:0 */
 		reg_addr = 0x6973;
 		val_to_set = val & 0xF;
 		value_mask = 0xFFA0;
 		break;
 	case 7:
+        /* 2.5G-Lite: 30.0x6974.15:8 */
 		reg_addr = 0x6974;
 		val_to_set = val & 0xF00;
 		value_mask = 0xA0FF;
 		break;
 	case 8:
+        /* 5G-Lite: 30.0x6973.15:8 */
 		reg_addr = 0x6973;
 		val_to_set = val & 0xF00;
 		value_mask = 0xA0FF;
 		break;
 	case 9:
+        /* unknow */
 		reg_addr = 0x6972;
 		val_to_set = val & 0xF00;
 		value_mask = 0xA0FF;
@@ -398,6 +418,7 @@ int Nic_Rtl8261X_usxgmii_autoNego_set(struct phy_device *phydev, bool enable)
 	ret = MmdPhyWrite(phydev, MDIO_MMD_VEND1, 0x7588, 0xF1);
 	if (ret) return ret;
 
+    /* Enable/Disable USXGMII Auto-Negotiation */
 	value = (enable != 0) ? 0x854F : 0x854E;
 	ret = MmdPhyWrite(phydev, MDIO_MMD_VEND1, 0x7589, value);
 	if (ret) return ret;
@@ -420,7 +441,7 @@ int Nic_Rtl8261X_enable_set(struct phy_device *phydev, bool enable)
 	int ret;
 	uint16_t value;
 
-	ret = MmdPhyRead(phydev, 1, 0, &value);
+	ret = MmdPhyRead(phydev, MDIO_MMD_PMAPMD, 0, &value);
 	if (ret) return ret;
 
 	if (enable != 0)
@@ -428,7 +449,7 @@ int Nic_Rtl8261X_enable_set(struct phy_device *phydev, bool enable)
 	else
 		value = value | 0x0800;
 
-	return MmdPhyWrite(phydev, 1, 0, value);
+	return MmdPhyWrite(phydev, MDIO_MMD_PMAPMD, 0, value);
 }
 
 int Nic_Rtl8261X_autoNegoAbility_set(struct phy_device *phydev, rtk_autoNegoAbility_cfg_t *config)
@@ -594,7 +615,7 @@ int Nic_Rtl8261X_linkDownPowerSavingEnable_get(struct phy_device *phydev, bool *
 	int ret;
 	uint16_t value;
 
-	ret = MmdPhyRead(phydev, MDIO_MMD_VEND2, 0xA430, &value);
+	ret = MmdPhyRead(phydev, MDIO_MMD_VEND2, RTL8261C_OCP_POWER_CFG, &value);
 	if (ret) return ret;
 
 	*enabled = (value & 4) != 0;
@@ -606,13 +627,13 @@ int Nic_Rtl8261X_linkDownPowerSavingEnable_set(struct phy_device *phydev, bool e
 	int ret;
 	uint16_t value;
 
-	ret = MmdPhyRead(phydev, MDIO_MMD_VEND2, 0xA430, &value);
+	ret = MmdPhyRead(phydev, MDIO_MMD_VEND2, RTL8261C_OCP_POWER_CFG, &value);
 	if (ret) return ret;
 	value = value & 0xFFFB;
 
 	if (enable)
 		value = value | 4;
-	return MmdPhyWrite(phydev, MDIO_MMD_VEND2, 0xA430, value);
+	return MmdPhyWrite(phydev, MDIO_MMD_VEND2, RTL8261C_OCP_POWER_CFG, value);
 }
 
 int Nic_Rtl8261X_loopback_set(struct phy_device *phydev, bool enable)
@@ -809,32 +830,24 @@ int Nic_Rtl8261X_masterSlave_set(struct phy_device *phydev, int mode)
 
 int Nic_Rtl8261X_masterSlave_get(struct phy_device *phydev, int *mode)
 {
-	// what fuxk is this????
-	// __int64 result; // x0
-	// unsigned __int16 v5; // w3
-	// __int16 value; // [xsp+2Eh] [xbp+2Eh] BYREF
 
-	// value = 0;
-	// result = (unsigned __int8)MmdPhyRead(a1, MDIO_MMD_AN, 0x20, &value);
-	// if ( (_DWORD)result )
-	// {
-	// 	v5 = value & 0x3FFF;
-	// 	value &= 0x3FFFu;
-	// 	if ( a2 == 1 )
-	// 	{
-	// 	value = v5 | 0x8000;
-	// 	return MmdPhyWrite(a1, MDIO_MMD_AN, 0x20, v5 | 0x8000);
-	// 	}
-	// 	if ( a2 )
-	// 	{
-	// 	result = 0;
-	// 	if ( a2 != 2 )
-	// 		return result;
-	// 	v5 |= 0xC000u;
-	// 	value = v5;
-	// 	}
-	// 	return MmdPhyWrite(a1, MDIO_MMD_AN, 0x20, v5);
-	// }
+	int ret;
+	uint16_t value;
+
+	ret = MmdPhyRead(phydev, MDIO_MMD_AN, 0x21, &value);
+	if (ret) return ret;
+
+	switch (value >> 14)
+	{
+	case 0:
+		*mode = 1;
+		break;
+	case 1:
+        *mode = 2;
+		break;
+	default:
+		return -EIO;
+	}
 	return 0;
 }
 
@@ -843,14 +856,13 @@ int Nic_Rtl8261X_crossOverMode_set(struct phy_device *phydev, int mode)
 	int ret;
 	uint16_t value;
 
-	ret = MmdPhyRead(phydev, MDIO_MMD_VEND2, 0xA430, &value);
+	ret = MmdPhyRead(phydev, MDIO_MMD_VEND2, RTL8261C_OCP_POWER_CFG, &value);
 	if (ret) return ret;
 	value = value & 0xFCFF;
 
 	switch (mode)
 	{
 	case 0:
-		/* code */
 		break;
 	case 1:
 		value = value | 0x300;
@@ -861,7 +873,7 @@ int Nic_Rtl8261X_crossOverMode_set(struct phy_device *phydev, int mode)
 	default: return -EINVAL;
 	}
 
-	return MmdPhyWrite(phydev, MDIO_MMD_VEND2, 0xA430, value);
+	return MmdPhyWrite(phydev, MDIO_MMD_VEND2, RTL8261C_OCP_POWER_CFG, value);
 }
 int Nic_Rtl8261X_crossOverStatus_get(struct phy_device *phydev, int *mode)
 {
@@ -926,7 +938,7 @@ int rtl8261d_set_led_blink_mode(struct phy_device *phydev, uint16_t mode, uint16
 int rtl8261x_config_init(struct phy_device *phydev)
 {
 	int ret;
-	phydev_info(phydev, "rtl8261x_config_init Start\n", ret);
+	phydev_info(phydev, "rtl8261x_config_init Start\n");
 
 	ret = Nic_Rtl8261X_phy_init(phydev);
 	if (ret){
@@ -1008,7 +1020,7 @@ int rtl8261x_config_init(struct phy_device *phydev)
 		phydev_err(phydev, "rtl8261d_set_led_blink_mode failed: %d\n", ret);
 		return ret;
 	}
-	phydev_info(phydev, "rtl8261x_config_init Finish...\n", ret);
+	phydev_info(phydev, "rtl8261x_config_init Finish...\n");
 
 	return 0;
 }
@@ -1193,7 +1205,7 @@ int rtl8261x_set_loopback(struct phy_device *phydev, bool enable)
 	return Nic_Rtl8261X_loopback_set(phydev, enable);
 }
 
-static int rtl8261x_match_phy_device_c45(struct phy_device *phydev)
+int rtl8261x_match_phy_device_c45(struct phy_device *phydev)
 {
 	u32 rid;
 	rid = phydev->c45_ids.device_ids[1];
@@ -1215,12 +1227,17 @@ static int rtl8261x_match_phy_device_c45(struct phy_device *phydev)
 	return (PHYID_RTL8261D_CG == rid);
 }
 
+int rtl8261x_probe(struct phy_device *phydev)
+{
+	return rtl822x_hwmon_init(phydev);
+}
+
 static struct phy_driver rtl8261_drv[] = {
 	{
 		.match_phy_device = rtl8261x_match_phy_device_c45,
 		.name		      = "RTL8261D Gigabit Ethernet",
 		.get_features     = rtl8261x_get_features,
-		// .probe            = rtl822x_probe,
+		.probe            = rtl8261x_probe,
 		.config_init      = rtl8261x_config_init,
 		.config_aneg      = rtl8261x_config_aneg,
 		.aneg_done        = rtl8261x_aneg_done,

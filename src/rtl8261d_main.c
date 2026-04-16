@@ -30,6 +30,26 @@
 #define RTL8261C_OCP_EEE_CFG	 	0xA432
 #define RTL8261C_OCP_POWER_CFG		0xa430
 
+/* RTL8261C-CG LED configuration (MMD VEND2) */
+#define RTL8261C_NR_LEDS					4
+#define RTL8261C_LED_LINK_SELECT			0xd032
+#define RTL8261C_LED_LINK_SELECT_OFFSET		0x2
+#define RTL8261C_LED_ACT_SELECT				0xd040
+#define RTL8261C_LED_POLARITY_SELECT		0xd044
+
+#define RTL8261C_LEDCR_LINK_10			BIT(0)
+#define RTL8261C_LEDCR_LINK_100			BIT(1)
+#define RTL8261C_LEDCR_LINK_1000		BIT(2)
+#define RTL8261C_LEDCR_LINK_10000		BIT(4)
+#define RTL8261C_LEDCR_LINK_2500		BIT(5)
+#define RTL8261C_LEDCR_LINK_5000		BIT(6)
+
+struct rtl826x_priv
+{
+	u8 led_active_low;
+};
+
+
 int MmdPhyRead(struct phy_device *phydev, int devad, uint32_t regnum, uint16_t *val)
 {
 	if (!phydev)
@@ -1015,11 +1035,6 @@ int rtl8261x_config_init(struct phy_device *phydev)
 		return ret;
 	}
 
-	ret = rtl8261d_set_led_blink_mode(phydev, 1023, 3);
-	if (ret){
-		phydev_err(phydev, "rtl8261d_set_led_blink_mode failed: %d\n", ret);
-		return ret;
-	}
 	phydev_info(phydev, "rtl8261x_config_init Finish...\n");
 
 	return 0;
@@ -1229,7 +1244,220 @@ int rtl8261x_match_phy_device_c45(struct phy_device *phydev)
 
 int rtl8261x_probe(struct phy_device *phydev)
 {
+	struct rtl826x_priv *priv;
+	priv = devm_kzalloc(&phydev->mdio.dev, sizeof(*priv), GFP_KERNEL);
+	if (!priv)
+		return -ENOMEM;
+	phydev->priv = priv;
+
 	return rtl822x_hwmon_init(phydev);
+}
+
+static int rtl8261x_led_hw_is_supported(struct phy_device *phydev, u8 index,
+					unsigned long rules)
+{
+	const unsigned long mask = BIT(TRIGGER_NETDEV_LINK) |
+				   BIT(TRIGGER_NETDEV_LINK_10) |
+				   BIT(TRIGGER_NETDEV_LINK_100) |
+				   BIT(TRIGGER_NETDEV_LINK_1000) |
+				   BIT(TRIGGER_NETDEV_LINK_2500) |
+				   BIT(TRIGGER_NETDEV_LINK_5000) |
+				   BIT(TRIGGER_NETDEV_LINK_10000) |
+				   BIT(TRIGGER_NETDEV_TX) |
+				   BIT(TRIGGER_NETDEV_RX);
+
+	if (index >= RTL8261C_NR_LEDS)
+		return -EINVAL;
+
+	if (rules & ~mask)
+		return -EOPNOTSUPP;
+
+	// RX and TX are not differentiated, either both are set or not set. 
+	if (!(rules & BIT(TRIGGER_NETDEV_RX)) ^ !(rules & BIT(TRIGGER_NETDEV_TX)))
+		return -EOPNOTSUPP;
+
+	return 0;
+}
+
+static int rtl8261x_led_hw_control_get(struct phy_device *phydev, u8 index,
+				       unsigned long *rules)
+{
+	u16 reg = RTL8261C_LED_LINK_SELECT + index * RTL8261C_LED_LINK_SELECT_OFFSET;
+	int val;
+
+	if (index >= RTL8261C_NR_LEDS)
+		return -EINVAL;
+
+	val = phy_read_mmd(phydev, MDIO_MMD_VEND2, reg);
+	if (val < 0)
+		return val;
+
+	if (val & RTL8261C_LEDCR_LINK_10)
+		__set_bit(TRIGGER_NETDEV_LINK_10, rules);
+
+	if (val & RTL8261C_LEDCR_LINK_100)
+		__set_bit(TRIGGER_NETDEV_LINK_100, rules);
+
+	if (val & RTL8261C_LEDCR_LINK_1000)
+		__set_bit(TRIGGER_NETDEV_LINK_1000, rules);
+
+	if (val & RTL8261C_LEDCR_LINK_2500)
+		__set_bit(TRIGGER_NETDEV_LINK_2500, rules);
+
+	if (val & RTL8261C_LEDCR_LINK_5000)
+		__set_bit(TRIGGER_NETDEV_LINK_5000, rules);
+
+	if (val & RTL8261C_LEDCR_LINK_10000)
+		__set_bit(TRIGGER_NETDEV_LINK_10000, rules);
+
+	if ((val & RTL8261C_LEDCR_LINK_10) &&
+	    (val & RTL8261C_LEDCR_LINK_100) &&
+	    (val & RTL8261C_LEDCR_LINK_1000) &&
+	    (val & RTL8261C_LEDCR_LINK_2500) &&
+	    (val & RTL8261C_LEDCR_LINK_5000) &&
+	    (val & RTL8261C_LEDCR_LINK_10000))
+		__set_bit(TRIGGER_NETDEV_LINK, rules);
+
+	val = phy_read_mmd(phydev, MDIO_MMD_VEND2, RTL8261C_LED_ACT_SELECT);
+	if (val < 0)
+		return val;
+
+	if (val & BIT(index)) {
+		__set_bit(TRIGGER_NETDEV_TX, rules);
+		__set_bit(TRIGGER_NETDEV_RX, rules);
+	}
+
+	return 0;
+}
+
+
+static int rtl8261x_led_hw_control_set(struct phy_device *phydev, u8 index,
+				       unsigned long rules)
+{
+	struct rtl826x_priv *priv = phydev->priv;
+	u16 reg = RTL8261C_LED_LINK_SELECT + index * RTL8261C_LED_LINK_SELECT_OFFSET;
+	u16 ecr_mask = BIT(index) | BIT(index + 4);
+	u16 ecr_val, val = 0;
+	int ret;
+
+	if (index >= RTL8261C_NR_LEDS)
+		return -EINVAL;
+
+	if (test_bit(TRIGGER_NETDEV_LINK, &rules) ||
+	    test_bit(TRIGGER_NETDEV_LINK_10, &rules))
+		val |= RTL8261C_LEDCR_LINK_10;
+
+	if (test_bit(TRIGGER_NETDEV_LINK, &rules) ||
+	    test_bit(TRIGGER_NETDEV_LINK_100, &rules))
+		val |= RTL8261C_LEDCR_LINK_100;
+
+	if (test_bit(TRIGGER_NETDEV_LINK, &rules) ||
+	    test_bit(TRIGGER_NETDEV_LINK_1000, &rules))
+		val |= RTL8261C_LEDCR_LINK_1000;
+
+	if (test_bit(TRIGGER_NETDEV_LINK, &rules) ||
+	    test_bit(TRIGGER_NETDEV_LINK_2500, &rules))
+		val |= RTL8261C_LEDCR_LINK_2500;
+
+	if (test_bit(TRIGGER_NETDEV_LINK, &rules) ||
+	    test_bit(TRIGGER_NETDEV_LINK_5000, &rules))
+		val |= RTL8261C_LEDCR_LINK_5000;
+
+	if (test_bit(TRIGGER_NETDEV_LINK, &rules) ||
+	    test_bit(TRIGGER_NETDEV_LINK_10000, &rules))
+		val |= RTL8261C_LEDCR_LINK_10000;
+
+	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, reg, val);
+	if (ret < 0)
+		return ret;
+
+	ret = phy_modify_mmd(phydev, MDIO_MMD_VEND2, RTL8261C_LED_ACT_SELECT,
+			     BIT(index),
+			     (test_bit(TRIGGER_NETDEV_TX, &rules) ||
+			      test_bit(TRIGGER_NETDEV_RX, &rules)) ?
+			     BIT(index) : 0);
+	if (ret < 0)
+		return ret;
+
+	// active-high: polarity=0 (LOW=OFF when idle)
+	// active-low:  polarity=1 (HIGH=OFF when idle)
+	ecr_val = BIT(index + 4);
+	if (priv->led_active_low & BIT(index))
+		ecr_val |= BIT(index);
+
+	return phy_modify_mmd(phydev, MDIO_MMD_VEND2, RTL8261C_LED_POLARITY_SELECT,
+			      ecr_mask, ecr_val);
+}
+
+static int rtl8261x_led_brightness_set(struct phy_device *phydev, u8 index,
+				       enum led_brightness brightness)
+{
+	struct rtl826x_priv *priv = phydev->priv;
+	u16 reg = RTL8261C_LED_LINK_SELECT + index * RTL8261C_LED_LINK_SELECT_OFFSET;
+	u16 ecr_mask = BIT(index) | BIT(index + 4);
+	bool active;
+	u16 ecr_val;
+	int ret;
+
+	if (index >= RTL8261C_NR_LEDS)
+		return -EINVAL;
+
+	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, reg, 0);
+	if (ret < 0)
+		return ret;
+
+	ret = phy_clear_bits_mmd(phydev, MDIO_MMD_VEND2, RTL8261C_LED_ACT_SELECT,
+				 BIT(index));
+	if (ret < 0)
+		return ret;
+
+	active = (brightness != LED_OFF) ^
+		 !!(priv->led_active_low & BIT(index));
+
+	ecr_val = BIT(index + 4);
+	if (active)
+		ecr_val |= BIT(index);
+
+	return phy_modify_mmd(phydev, MDIO_MMD_VEND2, RTL8261C_LED_POLARITY_SELECT,
+			      ecr_mask, ecr_val);
+}
+
+static int rtl8261x_led_polarity_set(struct phy_device *phydev, int index,
+				     unsigned long modes)
+{
+	struct rtl826x_priv *priv = phydev->priv;
+	bool active_low = false, active_high = false;
+	u32 mode;
+
+	if (index >= RTL8261C_NR_LEDS)
+		return -EINVAL;
+
+	for_each_set_bit(mode, &modes, __PHY_LED_MODES_NUM) {
+		switch (mode) {
+		case PHY_LED_ACTIVE_LOW:
+			active_low = true;
+			break;
+		case PHY_LED_ACTIVE_HIGH:
+			active_high = true;
+			break;
+		default:
+			return -EINVAL;
+		}
+	}
+
+	if (active_low) {
+		priv->led_active_low |= BIT(index);
+		return phy_clear_bits_mmd(phydev, MDIO_MMD_VEND2,
+					  RTL8261C_LED_POLARITY_SELECT, BIT(index));
+	}
+
+	if (active_high) {
+		priv->led_active_low &= ~BIT(index);
+		return phy_set_bits_mmd(phydev, MDIO_MMD_VEND2,
+					RTL8261C_LED_POLARITY_SELECT, BIT(index));
+	}
+
+	return -EINVAL;
 }
 
 static struct phy_driver rtl8261_drv[] = {
@@ -1249,6 +1477,11 @@ static struct phy_driver rtl8261_drv[] = {
 		.get_tunable      = rtl8261x_get_tunable,
 		.set_tunable      = rtl8261x_set_tunable,
 		.set_loopback     = rtl8261x_set_loopback,
+		.led_hw_is_supported = rtl8261x_led_hw_is_supported,
+		.led_hw_control_get  = rtl8261x_led_hw_control_get,
+		.led_hw_control_set  = rtl8261x_led_hw_control_set,
+		.led_brightness_set  = rtl8261x_led_brightness_set,
+		.led_polarity_set    = rtl8261x_led_polarity_set,
 	}
 };
 

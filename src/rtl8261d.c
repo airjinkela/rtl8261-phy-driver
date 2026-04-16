@@ -10,17 +10,17 @@
 #include "rtl8261d.h"
 #include "rtl8261x_patchs.h"
 
-#define PHYID_RTL8261D_CG			0x001cc898
+#define RTL8261C_VND2_PHY_STATE			0xA420
 
-#define RTL8261C_VND2_THERMAL_SENSOR_CTRL 0xB54C
-
-#define RTL8261C_VND2_PHY_STATE	  		0xA420
-#define RTL8261C_VND2_INDIRECT_ADDR 	0xA436
-#define RTL8261C_VND2_INDIRECT_DATA 	0xA438
-
-#define RTL8261C_VND2_PATCH_CTRL 		0xB82E
-#define RTL8261C_VND2_PATCH_MODE_CTRL 	0xB820
+#define RTL8261C_VND2_PATCH_MODE_CTRL		0xB820
+#define RTL8261C_VND2_PATCH_MODE_STAT		0xB800
+#define RTL8261C_VND2_PATCH_CTRL		0xB82E
 #define RTL8261C_PATCH_SETUP_VAL		0x6100
+
+#define RTL8261C_VND2_INDIRECT_ADDR		0xA436
+#define RTL8261C_VND2_INDIRECT_DATA		0xA438
+
+#define RTL8261C_VND2_THERMAL_SENSOR_CTRL	0xB54C
 
 int MmdPhyRead(struct phy_device *phydev, int devad, uint32_t regnum, uint16_t *val)
 {
@@ -83,7 +83,7 @@ int Nic_Rtl8261X_phy_init(struct phy_device *phydev)
 	if (!phydev)
 		return -ENXIO;
 
-	ret = Nic_Rtl8261X_wait_for_bit(phydev, RTL8261C_VND2_PHY_STATE,, 3, 1);
+	ret = Nic_Rtl8261X_wait_for_bit(phydev, RTL8261C_VND2_PHY_STATE, 3, 1);
 	if (ret) return ret;
 
 	ret = MmdPhyWrite(phydev, MDIO_MMD_VEND2, 0xA400, 0x9200);
@@ -132,7 +132,7 @@ int Nic_Rtl8261X_phy_init(struct phy_device *phydev)
 	ret = MmdPhyWrite(phydev, MDIO_MMD_VEND2, RTL8261C_VND2_PATCH_MODE_CTRL, value);
 	if (ret) return ret;
 
-	ret = Nic_Rtl8261X_wait_for_bit(phydev, 0xB800, 0x40, 1);
+	ret = Nic_Rtl8261X_wait_for_bit(phydev, RTL8261C_VND2_PATCH_MODE_STAT, 0x40, 1);
 	if (ret) return ret;
 	ret = MmdPhyWrite(phydev, MDIO_MMD_VEND2, RTL8261C_VND2_INDIRECT_ADDR, 0x8023);
 	if (ret) return ret;
@@ -241,7 +241,7 @@ int Nic_Rtl8261X_phy_init(struct phy_device *phydev)
 	ret = MmdPhyWrite(phydev, MDIO_MMD_VEND2, RTL8261C_VND2_PATCH_MODE_CTRL, value);
 	if (ret) return ret;
 
-	ret = Nic_Rtl8261X_wait_for_bit(phydev, 0xB800, 0x40, 0);
+	ret = Nic_Rtl8261X_wait_for_bit(phydev, RTL8261C_VND2_PATCH_MODE_STAT, 0x40, 0);
 	if (ret) return ret;
 
 	ret = MmdPhyRead(phydev, MDIO_MMD_AN, 0x3C, &value);

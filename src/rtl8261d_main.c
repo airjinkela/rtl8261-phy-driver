@@ -1055,6 +1055,7 @@ int rtl8261x_get_features(struct phy_device *phydev)
     return 0;
 }
 
+/* unused function */
 int rtl8261x_suspend(struct phy_device *phydev)
 {
     int ret = 0;
@@ -1070,6 +1071,7 @@ int rtl8261x_suspend(struct phy_device *phydev)
     return ret;
 }
 
+/* unused function */
 int rtl8261x_resume(struct phy_device *phydev)
 {
 	return Nic_Rtl8261X_enable_set(phydev, 1);
@@ -1110,6 +1112,7 @@ int rtl8261x_config_aneg(struct phy_device *phydev)
     return genphy_c45_check_and_restart_aneg(phydev, changed);
 }
 
+/* unused function */
 int rtl8261x_aneg_done(struct phy_device *phydev)
 {
     return genphy_c45_aneg_done(phydev);
@@ -1468,12 +1471,12 @@ static struct phy_driver rtl8261_drv[] = {
 		.probe            = rtl8261x_probe,
 		.config_init      = rtl8261x_config_init,
 		.config_aneg      = rtl8261x_config_aneg,
-		.aneg_done        = rtl8261x_aneg_done,
+		.aneg_done        = genphy_c45_aneg_done,
 		.read_status      = rtl8261x_read_status,
 		.config_intr      = rtl8261x_ack_intr,
 		.handle_interrupt = rtl8261x_handle_intr,
-		.suspend	      = rtl8261x_suspend,
-		.resume		      = rtl8261x_resume,
+		.suspend	      = genphy_suspend,
+		.resume		      = genphy_resume,
 		.get_tunable      = rtl8261x_get_tunable,
 		.set_tunable      = rtl8261x_set_tunable,
 		.set_loopback     = rtl8261x_set_loopback,

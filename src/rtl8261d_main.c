@@ -7,6 +7,7 @@
 #include <linux/clk.h>
 #include <linux/string_choices.h>
 #include <linux/hwmon.h>
+#include <linux/version.h>
 
 #include "rtl8261d.h"
 #include "rtl8261x_patchs.h"
@@ -1223,7 +1224,13 @@ int rtl8261x_set_loopback(struct phy_device *phydev, bool enable)
 	return Nic_Rtl8261X_loopback_set(phydev, enable);
 }
 
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,12,44)
 int rtl8261x_match_phy_device_c45(struct phy_device *phydev)
+#else
+int rtl8261x_match_phy_device_c45(struct phy_device *phydev,
+				const struct phy_driver *phydrv)
+#endif
 {
 	u32 rid;
 	rid = phydev->c45_ids.device_ids[1];
